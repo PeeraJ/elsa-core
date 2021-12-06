@@ -1,92 +1,35 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
-using MQTTnet;
-using MQTTnet.Client;
-using MQTTnet.Client.Options;
-using MQTTnet.Client.Subscribing;
-using MQTTnet.Extensions.ManagedClient;
-using MQTTnet.Formatter;
-using Storage.Net.Messaging;
+using Elsa.Activities.Mqtt.Options;
+using Microsoft.Extensions.Logging;
+using System.Net.Mqtt;
 
 namespace Elsa.Activities.Mqtt.Services
 {
     public class BusClientFactory : IMessageReceiverClientFactory, IMessageSenderClientFactory
     {
-        private readonly IManagedMqttClientOptions _optionsS;
-        private readonly IManagedMqttClientOptions _optionsR;
-        // private readonly ManagementClient _managementClient;
-        private readonly IDictionary<string, IManagedMqttClientWrapper> _senders = new Dictionary<string, IManagedMqttClientWrapper>();
-        private readonly IDictionary<string, IManagedMqttClientWrapper> _receivers = new Dictionary<string, IManagedMqttClientWrapper>();
-        private IMqttFactory _factory;
+        private readonly IDictionary<int, IMqttClientWrapper> _senders = new Dictionary<int, IMqttClientWrapper>();
+        private readonly IDictionary<int, IMqttClientWrapper> _receivers = new Dictionary<int, IMqttClientWrapper>();
         private readonly SemaphoreSlim _semaphore = new(1);
+        private readonly ILogger _logger;
 
-        public BusClientFactory()
+        public BusClientFactory(ILogger logger)
         {
-            //_options = options;
-            // _managementClient = managementClient;
-            _factory = new MqttFactory();
-
-            //var tlsOptions = new MqttClientTlsOptions
-            //{
-            //    UseTls = false, IgnoreCertificateChainErrors = true, IgnoreCertificateRevocationErrors = true, AllowUntrustedCertificates = true
-            //};
-
-            //var clientOptions = new MqttClientOptions
-            //{
-            //    ClientId = "Elsa_" + Guid.NewGuid().ToString(),
-            //    ProtocolVersion = MqttProtocolVersion.V311,
-            //    ChannelOptions = new MqttClientTcpOptions
-            //    {
-            //        Server = "localhost", Port = 1883, TlsOptions = tlsOptions
-            //    }
-            //};
-
-            //_options = new ManagedMqttClientOptions
-            //{
-            //    ClientOptions = clientOptions
-            //};
-
-            _optionsS = new ManagedMqttClientOptionsBuilder()
-                .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
-                .WithClientOptions(
-                    new MqttClientOptionsBuilder()
-                        .WithClientId("Elsa_Sender")
-                        .WithTcpServer("localhost", 1883)
-                        .WithCredentials("elsa_user", "password")
-                        .Build())
-                .Build();
-
-            _optionsR = new ManagedMqttClientOptionsBuilder()
-                .WithAutoReconnectDelay(TimeSpan.FromSeconds(5))
-                .WithClientOptions(
-                    new MqttClientOptionsBuilder()
-                        //.WithClientId("Elsa_" + Guid.NewGuid().ToString())
-                        .WithClientId("Elsa_Receiver")
-                        .WithTcpServer("localhost", 1883)
-                        .WithCredentials("elsa_user", "password")
-                        .Build())
-                .Build();
+            _logger = logger;
         }
 
 
-        public async Task<IManagedMqttClientWrapper> GetSenderAsync(string topic, CancellationToken cancellationToken)
+        public async Task<IMqttClientWrapper> GetSenderAsync(MqttClientOptions options, CancellationToken cancellationToken)
         {
             await _semaphore.WaitAsync(cancellationToken);
 
             try
             {
-                if (_senders.TryGetValue(topic, out var messageSender))
+                if (_senders.TryGetValue(options.GetHashCode(), out var messageSender))
                     return messageSender;
 
-                //await EnsureQueueExistsAsync(queueName, cancellationToken);
+                var newClient = await MqttClient.CreateAsync(options.Host, options.Port);
+                var newMessageSender = new MqttClientWrapper(newClient, options, _logger);
 
-                var newClient = _factory.CreateManagedMqttClient();
-
-                var newMessageSender = new ManagedMqttClientWrapper(newClient, _optionsS, topic);
-
-                _senders.Add(topic, newMessageSender);
+                _senders.Add(newMessageSender.Options.GetHashCode(), newMessageSender);
                 return newMessageSender;
             }
             finally
@@ -95,20 +38,19 @@ namespace Elsa.Activities.Mqtt.Services
             }
         }
 
-        public async Task<IManagedMqttClientWrapper> GetReceiverAsync(string topic, CancellationToken cancellationToken)
+        public async Task<IMqttClientWrapper> GetReceiverAsync(MqttClientOptions options, CancellationToken cancellationToken)
         {
             await _semaphore.WaitAsync(cancellationToken);
 
             try
             {
-                if (_receivers.TryGetValue(topic, out var messageReceiver))
+                if (_receivers.TryGetValue(options.GetHashCode(), out var messageReceiver))
                     return messageReceiver;
 
-                var newClient = _factory.CreateManagedMqttClient();
-
-                var newMessageReceiver = new ManagedMqttClientWrapper(newClient, _optionsR, topic);
+                var newClient = await MqttClient.CreateAsync(options.Host, options.Port);
+                var newMessageReceiver = new MqttClientWrapper(newClient, options, _logger);
                 
-                _receivers.Add(topic, newMessageReceiver);
+                _receivers.Add(options.GetHashCode(), newMessageReceiver);
                 return newMessageReceiver;
             }
             finally
@@ -117,54 +59,19 @@ namespace Elsa.Activities.Mqtt.Services
             }
         }
 
-        public async Task DisposeReceiverAsync(IManagedMqttClientWrapper receiverClient, CancellationToken cancellationToken = default)
+        public async Task DisposeReceiverAsync(IMqttClientWrapper receiverClient, CancellationToken cancellationToken = default)
         {
             await _semaphore.WaitAsync(cancellationToken);
 
-            //var key = GetKeyFor(receiverClient);
-
             try
             {
-                _receivers.Remove(receiverClient.Id);
-                await receiverClient.StopAsync();
-                receiverClient.Dispose();//??
+                _receivers.Remove(receiverClient.Options.GetHashCode());
+                receiverClient.Dispose();
             }
             finally
             {
                 _semaphore.Release();
             }
         }
-
-        // private async Task EnsureQueueExistsAsync(string queueName, CancellationToken cancellationToken)
-        // {
-        //     if (await _managementClient.QueueExistsAsync(queueName, cancellationToken))
-        //         return;
-        //
-        //     await _managementClient.CreateQueueAsync(queueName, cancellationToken);
-        // }
-
-        
-
-        // private async Task EnsureTopicExistsAsync(string topicName, CancellationToken cancellationToken)
-        // {
-        //     if (!await _managementClient.TopicExistsAsync(topicName, cancellationToken))
-        //         await _managementClient.CreateTopicAsync(topicName, cancellationToken);
-        // }
-        //
-        // private async Task EnsureTopicAndSubscriptionExistsAsync(string topicName, string subscriptionName, CancellationToken cancellationToken)
-        // {
-        //     await EnsureTopicExistsAsync(topicName, cancellationToken);
-        //
-        //     if (!await _managementClient.SubscriptionExistsAsync(topicName, subscriptionName, cancellationToken))
-        //         await _managementClient.CreateSubscriptionAsync(topicName, subscriptionName, cancellationToken);
-        // }
-        
-        //private static string GetKeyFor(IMqttClient receiverClient) => receiverClient.
-            // receiverClient switch
-            // {
-            //     IMessageReceiver messageReceiver => messageReceiver.Path,
-            //     ISubscriptionClient subscriptionClient => $"{subscriptionClient.TopicPath}:{subscriptionClient.SubscriptionName}",
-            //     _ => throw new ArgumentOutOfRangeException(nameof(receiverClient), receiverClient, null)
-            // };
     }
 }

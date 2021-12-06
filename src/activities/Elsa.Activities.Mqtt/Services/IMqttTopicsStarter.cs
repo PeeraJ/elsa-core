@@ -1,9 +1,6 @@
-﻿using System.Threading;
-using System.Threading.Tasks;
-
 namespace Elsa.Activities.Mqtt.Services
 {
-    public interface IMqttTopicsStarter//tODO: name?
+    public interface IMqttTopicsStarter
     {
         Task CreateWorkersAsync(CancellationToken cancellationToken = default);
     }

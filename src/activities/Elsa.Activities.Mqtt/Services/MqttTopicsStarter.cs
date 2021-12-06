@@ -1,16 +1,11 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Threading;
-using System.Threading.Tasks;
+using Elsa.Activities.Mqtt.Options;
 using Elsa.Persistence;
 using Elsa.Persistence.Specifications.WorkflowInstances;
 using Elsa.Services;
 using Elsa.Services.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using MQTTnet.Client;
+using System.Runtime.CompilerServices;
 
 namespace Elsa.Activities.Mqtt.Services
 {
@@ -37,24 +32,24 @@ namespace Elsa.Activities.Mqtt.Services
 
         public async Task CreateWorkersAsync(CancellationToken cancellationToken)
         {
-            await DisposeExistingWorkersAsync();//tODO: subscription name alternative?
-            var topics = (await GetTopicsAsync(cancellationToken).ToListAsync(cancellationToken)).Distinct();
+            await DisposeExistingWorkersAsync();
+            var configs = (await GetConfigurationsAsync(cancellationToken).ToListAsync(cancellationToken)).Distinct();
 
-            foreach (var topic in topics) 
-                await CreateAndAddWorkerAsync(topic, cancellationToken);
+            foreach (var config in configs) 
+                await CreateAndAddWorkerAsync(config, cancellationToken);
         }
 
-        private async Task CreateAndAddWorkerAsync(string topic, CancellationToken cancellationToken)
+        private async Task CreateAndAddWorkerAsync(MqttClientOptions config, CancellationToken cancellationToken)
         {
             try
             {
-                var receiver = await _receiverFactory.GetReceiverAsync(topic, cancellationToken);
-                var worker = ActivatorUtilities.CreateInstance<Worker>(_serviceProvider, receiver, topic, (Func<IManagedMqttClientWrapper, Task>) DisposeReceiverAsync);
+                var receiver = await _receiverFactory.GetReceiverAsync(config, cancellationToken);
+                var worker = ActivatorUtilities.CreateInstance<Worker>(_serviceProvider, receiver, (Func<IMqttClientWrapper, Task>) DisposeReceiverAsync);
                 _workers.Add(worker);
             }
             catch (Exception e)
             {
-                _logger.LogWarning(e, "Failed to create a receiver for topic {Topic}", topic);
+                _logger.LogWarning(e, "Failed to create a receiver for topic {Topic}", config.Topic);
             }
         }
 
@@ -67,9 +62,9 @@ namespace Elsa.Activities.Mqtt.Services
             }
         }
 
-        private async Task DisposeReceiverAsync(IManagedMqttClientWrapper messageReceiver) => await _receiverFactory.DisposeReceiverAsync(messageReceiver);
+        private async Task DisposeReceiverAsync(IMqttClientWrapper messageReceiver) => await _receiverFactory.DisposeReceiverAsync(messageReceiver);
 
-        private async IAsyncEnumerable<string> GetTopicsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+        private async IAsyncEnumerable<MqttClientOptions> GetConfigurationsAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
             using var scope = _scopeFactory.CreateScope();
             var workflowRegistry = scope.ServiceProvider.GetRequiredService<IWorkflowRegistry>();
@@ -94,7 +89,13 @@ namespace Elsa.Activities.Mqtt.Services
                 foreach (var activity in workflowBlueprintWrapper.Filter<MqttMessageReceived>())
                 {
                     var topic = await activity.EvaluatePropertyValueAsync(x => x.Topic, cancellationToken);
-                    yield return topic!;
+                    var host = await activity.EvaluatePropertyValueAsync(x => x.Host, cancellationToken);
+                    var port = await activity.EvaluatePropertyValueAsync(x => x.Port, cancellationToken);
+                    var username = await activity.EvaluatePropertyValueAsync(x => x.Username, cancellationToken);
+                    var password = await activity.EvaluatePropertyValueAsync(x => x.Password, cancellationToken);
+                    var qos = await activity.EvaluatePropertyValueAsync(x => x.QualityOfService, cancellationToken);
+
+                    yield return new MqttClientOptions(topic!, host!, port!, username!, password!, qos);
                 }
             }
         }

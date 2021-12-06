@@ -14,8 +14,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="MQTTnet" Version="3.1.1" />
-      <PackageReference Include="MQTTnet.Extensions.ManagedClient" Version="3.1.1" />
+      <PackageReference Include="System.Net.Mqtt" Version="0.6.16-beta" />
     </ItemGroup>
 
 </Project>

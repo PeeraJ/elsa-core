@@ -1,67 +1,43 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Elsa.Activities.Mqtt.Bookmarks;
+using Elsa.Activities.Mqtt.Options;
 using Elsa.Models;
 using Elsa.Services;
 using Elsa.Services.Models;
-using Microsoft.Extensions.Logging;
-using MQTTnet;
-using MQTTnet.Client;
-using MQTTnet.Client.Options;
-using MQTTnet.Client.Subscribing;
-using MQTTnet.Extensions.ManagedClient;
+using System.Net.Mqtt;
 
 namespace Elsa.Activities.Mqtt.Services
 {
     public class Worker
     {
         private readonly Scoped<IWorkflowLaunchpad> _workflowLaunchpad;
-        private readonly Func<IManagedMqttClientWrapper, Task> _disposeReceiverAction;
-        private readonly ILogger _logger;//tODO: log
+        private readonly Func<IMqttClientWrapper, Task> _disposeReceiverAction;
+        private IMqttClientWrapper ReceiverClient { get; }
         
         public Worker(
-            IManagedMqttClientWrapper receiverClient,
-            string topic,
+            IMqttClientWrapper receiverClient,
             Scoped<IWorkflowLaunchpad> workflowLaunchpad,
-            Func<IManagedMqttClientWrapper, Task> disposeReceiverAction,
-            ILogger<Worker> logger)
+            Func<IMqttClientWrapper, Task> disposeReceiverAction)
         {
             ReceiverClient = receiverClient;
             _workflowLaunchpad = workflowLaunchpad;
             _disposeReceiverAction = disposeReceiverAction;
-            _logger = logger;
 
-
-            //tODO: move
-
-            ReceiverClient.StartAsync();
-
-            ReceiverClient.SubscribeAsync(topic);
-            ReceiverClient.AddMessageHandler(OnMessageReceived);
+            ReceiverClient.SetMessageHandler(OnMessageReceived);
         }
 
-        private IManagedMqttClientWrapper ReceiverClient { get; }
         private string ActivityType => nameof(MqttMessageReceived);
         public async ValueTask DisposeAsync() => await _disposeReceiverAction(ReceiverClient);
 
-        private IBookmark CreateBookmark(string topic) => new MessageReceivedBookmark(topic); 
+        private IBookmark CreateBookmark(MqttClientOptions options) => new MessageReceivedBookmark(options.Topic, options.Host, options.Port, options.Username, options.Password); 
 
         private async Task TriggerWorkflowsAsync(MqttApplicationMessage message, CancellationToken cancellationToken)
         {
-            var bookmark = CreateBookmark(message.Topic);
+            var bookmark = CreateBookmark(ReceiverClient.Options);
             var launchContext = new WorkflowsQuery(ActivityType, bookmark);
             
             await _workflowLaunchpad.UseServiceAsync(service => service.CollectAndDispatchWorkflowsAsync(launchContext, new WorkflowInput(message), cancellationToken));
         }
         
-        private async Task OnMessageReceived(MqttApplicationMessage message)
-        {
-            await TriggerWorkflowsAsync(message, CancellationToken.None);
-
-            await ReceiverClient.StopAsync();
-
-            //await ReceiverClient.DisconnectAsync(CancellationToken.None);//tODO? properly dispose??
-        }
+        private async Task OnMessageReceived(MqttApplicationMessage message) => await TriggerWorkflowsAsync(message, CancellationToken.None);
     }
 }

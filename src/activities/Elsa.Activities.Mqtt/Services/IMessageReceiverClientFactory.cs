@@ -1,13 +1,10 @@
-using System.Threading;
-using System.Threading.Tasks;
-using MQTTnet.Client;
-using MQTTnet.Extensions.ManagedClient;
+using Elsa.Activities.Mqtt.Options;
 
 namespace Elsa.Activities.Mqtt.Services
 {
     public interface IMessageReceiverClientFactory
     {
-        Task<IManagedMqttClientWrapper> GetReceiverAsync(string topic, CancellationToken cancellationToken = default);
-        Task DisposeReceiverAsync(IManagedMqttClientWrapper receiverClient, CancellationToken cancellationToken = default);
+        Task<IMqttClientWrapper> GetReceiverAsync(MqttClientOptions configuration, CancellationToken cancellationToken = default);
+        Task DisposeReceiverAsync(IMqttClientWrapper receiverClient, CancellationToken cancellationToken = default);
     }
 }

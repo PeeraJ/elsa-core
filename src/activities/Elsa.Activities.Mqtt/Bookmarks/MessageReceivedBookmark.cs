@@ -1,6 +1,3 @@
-﻿using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Elsa.Services;
 
 namespace Elsa.Activities.Mqtt.Bookmarks
@@ -11,12 +8,20 @@ namespace Elsa.Activities.Mqtt.Bookmarks
         {
         }
 
-        public MessageReceivedBookmark(string topic)
+        public MessageReceivedBookmark(string topic, string host, int port, string username, string password)
         {
             Topic = topic;
+            Host = host;
+            Port = port;
+            Username = username;
+            Password = password;
         }
 
         public string Topic { get; set; } = default!;
+        public string Host { get; set; } = default!;
+        public int Port { get; set; } = default!;
+        public string Username { get; set; } = default!;
+        public string Password { get; set; } = default!;
     }
 
     public class MessageReceivedBookmarkProvider : BookmarkProvider<MessageReceivedBookmark, MqttMessageReceived>
@@ -27,6 +32,10 @@ namespace Elsa.Activities.Mqtt.Bookmarks
                 Result(new MessageReceivedBookmark
                 {
                     Topic = (await context.ReadActivityPropertyAsync(x => x.Topic, cancellationToken))!,
+                    Host = (await context.ReadActivityPropertyAsync(x => x.Host, cancellationToken))!,
+                    Port = (await context.ReadActivityPropertyAsync(x => x.Port, cancellationToken))!,
+                    Username = (await context.ReadActivityPropertyAsync(x => x.Username, cancellationToken))!,
+                    Password = (await context.ReadActivityPropertyAsync(x => x.Password, cancellationToken))!
                 })
             };
     }
